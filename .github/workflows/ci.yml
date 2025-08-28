@@ -46,7 +46,7 @@ jobs:
           registry-url: 'https://npm.pkg.github.com'
           scope: '@eben4real'
 
-      - name: Set git user for Lerna
+      - name: Set git user
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
