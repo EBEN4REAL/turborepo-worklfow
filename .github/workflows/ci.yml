@@ -51,9 +51,9 @@ jobs:
           git config --global user.name "github-actions[bot]"
 
       - name: Install Dependencies
-        run: npm install
+        run: yarn install
 
       - name: Publish to GitHub Packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.TOKEN }}
-        run: npm publish
+        run: yarn publish
