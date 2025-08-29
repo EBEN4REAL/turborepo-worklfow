@@ -166,7 +166,7 @@ jobs:
           fi
 
       - name: Build Web App (Turborepo)
-        run: yarn turbo run build --filter=apps/web...
+        run: yarn turbo run build --filter=web...
         env:
           NODE_ENV: production
 
