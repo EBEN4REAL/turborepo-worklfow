@@ -1,128 +1,3 @@
-# name: CI/CD
-
-# on:
-#   push:
-#     branches:
-#       - main
-#   pull_request:
-
-# permissions:
-#   contents: write
-#   packages: write
-#   id-token: write 
-
-# jobs:
-#   build:
-#     runs-on: ubuntu-latest
-#     steps:
-#       - name: Checkout Repository
-#         uses: actions/checkout@v3
-
-#       - name: Set up Node.js
-#         uses: actions/setup-node@v3
-#         with:
-#           node-version: 20
-#           registry-url: 'https://npm.pkg.github.com/'
-#           scope: '@eben4real'
-
-#       - name: Install Dependencies
-#         run: yarn install --frozen-lockfile
-
-#       - name: Run Tests
-#         run: yarn run test
-
-#       - name: Build Web App
-#         run: yarn turbo run build
-#         # 👆 ensures only apps/web (and its dependencies in packages/*) are built
-
-#       - name: Upload Web Build
-#         uses: actions/upload-artifact@v3
-#         with:
-#           name: web-build
-#           path: apps/web/out   # Next.js static export
-#           # or apps/web/build (React CRA)
-#           # or apps/web/dist (Vue)
-#           # adjust depending on your framework
-
-#   publish:
-#     needs: build
-#     runs-on: ubuntu-latest
-#     if: github.ref == 'refs/heads/main'
-#     steps:
-#       - name: Checkout Repository
-#         uses: actions/checkout@v3
-#         with:
-#           fetch-depth: 0
-
-#       - name: Set up Node.js
-#         uses: actions/setup-node@v3
-#         with:
-#           node-version: 20
-#           registry-url: 'https://npm.pkg.github.com'
-#           scope: '@eben4real'
-
-#       - name: Install Dependencies
-#         run: yarn install --frozen-lockfile
-
-#       - name: Create Release PR or Publish
-#         uses: changesets/action@v1
-#         with:
-#           publish: yarn changeset publish
-#         env:
-#           GITHUB_TOKEN: ${{ secrets.TOKEN }}
-#           NODE_AUTH_TOKEN: ${{ secrets.TOKEN }}
-
-#   deploy:
-#     needs: build
-#     runs-on: ubuntu-latest
-#     if: github.ref == 'refs/heads/main'
-#     environment:
-#       name: production
-#       url: https://dXXXXXXXXXXXX.cloudfront.net   # or your custom domain
-#     steps:
-#       - name: Download Web Build
-#         uses: actions/download-artifact@v4
-#         with:
-#           name: web-build
-#           path: web-build
-
-#       # pick the right inner folder from your artifact
-#       - name: Determine build directory
-#         id: outdir
-#         run: |
-#           if [ -d "web-build/out" ]; then echo "dir=web-build/out" >> $GITHUB_OUTPUT;
-#           elif [ -d "web-build/dist" ]; then echo "dir=web-build/dist" >> $GITHUB_OUTPUT;
-#           elif [ -d "web-build/build" ]; then echo "dir=web-build/build" >> $GITHUB_OUTPUT;
-#           else echo "No build output found" && ls -la web-build && exit 1; fi
-
-#       - name: Configure AWS Credentials (OIDC)
-#         uses: aws-actions/configure-aws-credentials@v4
-#         with:
-#           role-to-assume: arn:aws:iam::298722972102:role/GithubOidcDeployRole
-#           aws-region: ${{ vars.AWS_REGION }}       # set e.g. eu-north-1 in repo Variables
-
-#       - name: Sync assets to S3 (long cache)
-#         run: |
-#           aws s3 sync "${{ steps.outdir.outputs.dir }}/" "s3://${{ vars.S3_BUCKET }}/" \
-#             --delete \
-#             --exclude "index.html" \
-#             --cache-control "public, max-age=31536000, immutable"
-
-#       - name: Upload index.html (short cache)
-#         run: |
-#           if [ -f "${{ steps.outdir.outputs.dir }}/index.html" ]; then
-#             aws s3 cp "${{ steps.outdir.outputs.dir }}/index.html" "s3://${{ vars.S3_BUCKET }}/index.html" \
-#               --cache-control "public, max-age=0, must-revalidate" \
-#               --content-type "text/html; charset=utf-8";
-#           fi
-
-#       - name: Invalidate CloudFront Cache
-#         run: |
-#           aws cloudfront create-invalidation \
-#             --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
-#             --paths "/*"
-
-
 name: CI/CD
 
 on:
@@ -155,7 +30,7 @@ jobs:
       - name: Install Dependencies
         run: yarn install --frozen-lockfile
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.TOKEN }}  # for GitHub Packages
 
       - name: Run Tests
         run: |
@@ -165,11 +40,31 @@ jobs:
             echo "No test script found, skipping."
           fi
 
+      # Build only apps/web (and its deps) via path filter
       - name: Build Web App (Turborepo)
         run: yarn turbo run build --filter=@eben4real/web...
         env:
           NODE_ENV: production
 
+      # Fail fast if static export didn't happen
+      - name: Assert build output exists
+        run: |
+          if [ ! -d "apps/web/out" ]; then
+            echo "apps/web/out not found. The app did not export static files."
+            echo "Tree of apps/web:"; ls -la apps/web || true
+            exit 1
+          fi
+          echo "Found apps/web/out:"
+          ls -la apps/web/out
+
+      # Upload the exact folder the deploy job expects
+      - name: Upload Web Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: apps/web/out
+          if-no-files-found: error
+          retention-days: 5
 
   publish:
     needs: build
@@ -207,7 +102,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     environment:
       name: production
-      url: d2ej5qzyy7dju9.cloudfront.net   # replace with your CloudFront/custom domain
+      url: https://d2ej5qzyy7dju9.cloudfront.net  # use full URL for a clickable link
     steps:
       - name: Download Web Build
         uses: actions/download-artifact@v4
@@ -215,16 +110,10 @@ jobs:
           name: web-build
           path: web-build
 
-      - name: Determine build directory
+      # We uploaded apps/web/out directly, so the artifact root IS the output
+      - name: Set output dir
         id: outdir
-        run: |
-          if [ -d "web-build/apps/web/out" ]; then echo "dir=web-build/apps/web/out" >> $GITHUB_OUTPUT;
-          elif [ -d "web-build/apps/web/dist" ]; then echo "dir=web-build/apps/web/dist" >> $GITHUB_OUTPUT;
-          elif [ -d "web-build/apps/web/build" ]; then echo "dir=web-build/apps/web/build" >> $GITHUB_OUTPUT;
-          elif [ -d "web-build/out" ]; then echo "dir=web-build/out" >> $GITHUB_OUTPUT;
-          elif [ -d "web-build/dist" ]; then echo "dir=web-build/dist" >> $GITHUB_OUTPUT;
-          elif [ -d "web-build/build" ]; then echo "dir=web-build/build" >> $GITHUB_OUTPUT;
-          else echo "No build output found" && echo "Listing:" && ls -laR web-build && exit 1; fi
+        run: echo "dir=web-build" >> $GITHUB_OUTPUT
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -241,11 +130,9 @@ jobs:
 
       - name: Upload index.html (short cache)
         run: |
-          if [ -f "${{ steps.outdir.outputs.dir }}/index.html" ]; then
-            aws s3 cp "${{ steps.outdir.outputs.dir }}/index.html" "s3://${{ vars.S3_BUCKET }}/index.html" \
-              --cache-control "public, max-age=0, must-revalidate" \
-              --content-type "text/html; charset=utf-8";
-          fi
+          aws s3 cp "${{ steps.outdir.outputs.dir }}/index.html" "s3://${{ vars.S3_BUCKET }}/index.html" \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --content-type "text/html; charset=utf-8"
 
       - name: Invalidate CloudFront Cache
         run: |
