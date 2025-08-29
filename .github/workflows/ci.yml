@@ -155,26 +155,21 @@ jobs:
       - name: Install Dependencies
         run: yarn install --frozen-lockfile
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.TOKEN }}  # for GitHub Packages
+          NODE_AUTH_TOKEN: ${{ secrets.TOKEN }}
 
       - name: Run Tests
-        run: yarn test --if-present
+        run: |
+          if yarn run | grep -q "test"; then
+            yarn test
+          else
+            echo "No test script found, skipping."
+          fi
 
       - name: Build Web App (Turborepo)
         run: yarn turbo run build --filter=apps/web...
         env:
           NODE_ENV: production
 
-      # ⬇️ Pick the right output path for your framework
-      - name: Upload Web Build
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-build
-          path: |
-            apps/web/out
-            apps/web/dist
-            apps/web/build
-          if-no-files-found: ignore
 
   publish:
     needs: build
